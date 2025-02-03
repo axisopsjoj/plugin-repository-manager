@@ -1,0 +1,24 @@
+{
+    "name": "axisops/plugin-repository-manager",
+    "description": "A Composer plugin to dynamically add local and remote repositories for axisops/* packages",
+    "type": "composer-plugin",
+    "require": {
+      "composer/composer": "^2.0",
+      "composer-plugin-api": "^2.0"
+    },
+    "autoload": {
+      "psr-4": {
+        "Axisops\\ComposerPlugin\\": "src"
+      }
+    },
+    "extra": {
+      "class": "Axisops\\PluginRepoManager\\Plugin"
+    },
+    "license": "MIT",
+    "authors": [
+      {
+        "name": "Jo Jones",
+        "email": "jo.jones@axisops.com"
+      }
+    ]
+  }
