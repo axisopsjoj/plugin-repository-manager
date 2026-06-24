@@ -1,7 +1,8 @@
 {
     "name": "axisops/plugin-repository-manager",
-    "description": "A Composer plugin to dynamically add local and remote repositories for axisops/* packages",
+    "description": "A Composer plugin that configures axisops/* package sources and dependency channels (--local/--alpha/--beta/--rc/--prod) at runtime",
     "type": "composer-plugin",
+    "version": "1.1.0",
     "require": {
       "composer/composer": "^2.0",
       "composer-plugin-api": "^2.0"
@@ -13,6 +14,9 @@
     },
     "extra": {
       "class": "Axisops\\PluginRepoManager\\Plugin"
+    },
+    "archive": {
+      "exclude": ["/test", "/PLAN.md", "/.gitignore"]
     },
     "license": "MIT",
     "authors": [
