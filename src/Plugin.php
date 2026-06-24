@@ -39,8 +39,18 @@ class Plugin implements PluginInterface, EventSubscriberInterface
         'exclude'         => ['axisops/plugin-repository-manager'],
     ];
 
+    /**
+     * Composer commands for which we configure repositories / rewrite
+     * constraints. Read-only commands (config, show, …) are left untouched.
+     */
+    private const ACTIVE_COMMANDS = ['install', 'update', 'require', 'create-project'];
+
     public function activate(Composer $composer, IOInterface $io)
     {
+        if (!$this->runsForCurrentCommand()) {
+            return; // don't mutate config on read-only commands
+        }
+
         // Determine the active channel from AXISOPS_CONTEXT.
         try {
             $flags = new FlagParser();
@@ -66,6 +76,8 @@ class Plugin implements PluginInterface, EventSubscriberInterface
         if ($rewritten !== []) {
             $io->write('<info> Set ' . count($rewritten) . " package(s) to: $constraint</info>");
         }
+
+        $this->warnOnContextMismatch($composer, $io, $flags, $vendorPrefix, $exclude);
 
         $configurator = new RepositoryConfigurator($composer, $io);
 
@@ -113,6 +125,112 @@ class Plugin implements PluginInterface, EventSubscriberInterface
         $root = $this->projectRoot($composer);
 
         (new PostUpdateRunner($event->getIO(), $root))->run();
+    }
+
+    /**
+     * Warn (don't fail) when the existing composer.lock was generated in a
+     * different context than the one now requested — e.g. a local (path-repo)
+     * lock being used under prod. That mismatch otherwise surfaces as a cryptic
+     * Composer error ("found in the lock file but not in remote repositories"
+     * or a null-type DownloadManager crash).
+     */
+    private function warnOnContextMismatch(
+        Composer $composer,
+        IOInterface $io,
+        FlagParser $flags,
+        string $vendorPrefix,
+        array $exclude
+    ): void {
+        $lockPath = $this->projectRoot($composer) . '/composer.lock';
+        if (!is_file($lockPath)) {
+            return;
+        }
+
+        $lock = json_decode((string) @file_get_contents($lockPath), true);
+        if (!is_array($lock)) {
+            return;
+        }
+
+        $lockedLocal = false;
+        $lockedRegistry = false;
+        foreach (array_merge($lock['packages'] ?? [], $lock['packages-dev'] ?? []) as $p) {
+            $name = $p['name'] ?? '';
+            if (!str_starts_with($name, $vendorPrefix) || in_array($name, $exclude, true)) {
+                continue;
+            }
+            if (($p['dist']['type'] ?? null) === 'path') {
+                $lockedLocal = true;
+            } else {
+                $lockedRegistry = true;
+            }
+        }
+
+        if (!$lockedLocal && !$lockedRegistry) {
+            return; // no axisops packages locked yet
+        }
+
+        $wantLocal = $flags->isLocal();
+        $mismatch = ($wantLocal && !$lockedLocal) || (!$wantLocal && !$lockedRegistry && $lockedLocal);
+
+        if ($mismatch) {
+            $lockedAs = $lockedLocal ? 'local (path repositories)' : 'registry';
+            $io->writeError(sprintf(
+                '<warning>composer.lock was built for the %s context but you are running "%s". '
+                . 'Run "AXISOPS_CONTEXT=%s composer update" to regenerate the lock for this context, '
+                . 'or composer may fail to resolve axisops/* packages.</warning>',
+                $lockedAs,
+                $flags->channel(),
+                $flags->channel()
+            ));
+        }
+    }
+
+    /**
+     * Whether the composer command currently running is one we act on
+     * (install/update/require/create-project). Resolves Composer's unambiguous
+     * abbreviations (e.g. "up" -> update, "i" -> install) the same way Composer
+     * does. Unknown/ambiguous commands are treated as "act" so we never silently
+     * skip a real install — the cost of acting on an unexpected command is low.
+     */
+    private function runsForCurrentCommand(): bool
+    {
+        $command = $this->currentCommand();
+        if ($command === null) {
+            return true; // can't tell — be safe and act
+        }
+
+        foreach (self::ACTIVE_COMMANDS as $full) {
+            if ($command === $full || str_starts_with($full, $command)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The composer subcommand from argv: the first token after "composer" that
+     * is not an option. Returns null if it can't be determined.
+     */
+    private function currentCommand(): ?string
+    {
+        $argv = $_SERVER['argv'] ?? [];
+        if (!is_array($argv)) {
+            return null;
+        }
+
+        // Skip argv[0] (the composer binary), then the first non-option token.
+        foreach (array_slice($argv, 1) as $arg) {
+            if (!is_string($arg) || $arg === '') {
+                continue;
+            }
+            if ($arg[0] === '-') {
+                continue; // option like -v, --no-dev
+            }
+            return $arg;
+        }
+
+        return null;
     }
 
     private function projectRoot(Composer $composer): string

@@ -34,17 +34,28 @@ class PostUpdateRunner
 
         $this->io->write('<info>Running php artisan ' . self::COMMAND . '</info>');
 
-        $command = sprintf(
-            '%s %s %s 2>&1',
-            escapeshellarg(PHP_BINARY),
-            escapeshellarg($artisan),
-            escapeshellarg(self::COMMAND)
-        );
-
-        exec($command, $output, $exitCode);
-
-        foreach ($output as $line) {
-            $this->io->write('   ' . $line);
+        if ($this->io->isInteractive()) {
+            // Inherit the terminal so core:update can prompt the user and render
+            // its own output live.
+            $command = sprintf(
+                '%s %s %s',
+                escapeshellarg(PHP_BINARY),
+                escapeshellarg($artisan),
+                escapeshellarg(self::COMMAND)
+            );
+            passthru($command, $exitCode);
+        } else {
+            // No TTY (CI): capture output, pass --no-interaction so it can't hang.
+            $command = sprintf(
+                '%s %s %s --no-interaction 2>&1',
+                escapeshellarg(PHP_BINARY),
+                escapeshellarg($artisan),
+                escapeshellarg(self::COMMAND)
+            );
+            exec($command, $output, $exitCode);
+            foreach ($output as $line) {
+                $this->io->write('   ' . $line);
+            }
         }
 
         if ($exitCode !== 0) {
